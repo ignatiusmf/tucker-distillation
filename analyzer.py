@@ -18,8 +18,10 @@ device = "cuda"
 
 
 
-fmap = torch.load("toolbox/problem_fm.pt", map_location=device, weights_only=True)
-print(fmap.shape)
+problem_fmap = torch.load("toolbox/problem_fm.pt", map_location=device, weights_only=True)
+good_fmap = torch.load("toolbox/good_fm.pt", map_location=device, weights_only=True)
+
+type
 
 
 tl.set_backend("pytorch")
