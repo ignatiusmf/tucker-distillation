@@ -1,0 +1,23 @@
+#!/bin/sh
+#PBS -N imf_td
+#PBS -q gpu_1
+#PBS -P CSCI1166
+#PBS -l select=1:ncpus=10:mpiprocs=10:mem=32gb:ngpus=1
+#PBS -l walltime=04:00:00
+#PBS -o /mnt/lustre/users/iferreira/tucker-distillation/logs/td-standard.out
+#PBS -e /mnt/lustre/users/iferreira/tucker-distillation/logs/td-error.out
+#PBS -m abe -M u25755422@tuks.co.za
+
+ulimit -s unlimited
+module load chpc/python/anaconda/3-2021.11
+source /mnt/lustre/users/iferreira/myenv/bin/activate
+
+date
+echo -e 'Running python /mnt/lustre/users/iferreira/tucker-distillation/test.py\n'
+
+start_time=$(date +%s) 
+
+cd /mnt/lustre/users/iferreira/tucker-distillation
+python /mnt/lustre/users/iferreira/tucker-distillation/test.py
+
+echo -e "\nTotal execution time: $(( $(date +%s) - start_time)) seconds"
