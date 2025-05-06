@@ -1,46 +1,27 @@
 from toolbox.models import ResNet112, ResNet56
 from toolbox.data_loader import Cifar100
+from toolbox.utils import plot_the_things, evaluate_model
 
 import torch
-import torchvision
-import torchvision.transforms as transforms
 import torch.optim as optim
-import torch.nn as nn
 import torch.nn.functional as F
 
 import tensorly as tl
-import numpy as np
-import matplotlib.pyplot as plt
 
-from rich import print as pprint
-from tqdm import trange
+from pathlib import Path
+import argparse
 
-device = "cuda"
-EPOCHS=150
-###############################################################################
+DEVICE = "cuda"
 
-# TEACHER
-model_path = r"toolbox/Cifar100_ResNet112.pth"
-teacher = ResNet112(100).to(device)
-teacher.load_state_dict(torch.load(model_path, weights_only=True)["weights"])
-teacher.eval()
+# Hyperparameters
+EPOCHS = 150
+BETA = 125
+BATCH_SIZE = 128*4
 
-# STUDENT 
-student = ResNet56(100).to(device)
-student.train()
-
-
-optimizer = optim.SGD(student.parameters(), lr=0.1, momentum=0.9, weight_decay=5e-4)
-scheduler = optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=EPOCHS)
-
-
-Data = Cifar100()
-trainloader, testloader = Data.trainloader, Data.testloader
-
+# Functions
 tl.set_backend("pytorch")
-def tucker(feature_map): #expects 4d
-    batch_size, channels, height, width = feature_map.shape
-    core, factors = tl.decomposition.tucker(feature_map, rank=[batch_size, 32, 8, 8])
+def tucker(feature_map, ranks=[BATCH_SIZE, 32, 8, 8]): 
+    core, factors = tl.decomposition.tucker(feature_map, rank=ranks)
     return core, factors
 
 def compute_core(feature_map, factors):
@@ -49,55 +30,81 @@ def compute_core(feature_map, factors):
 def FT(x):
     return F.normalize(x.reshape(x.size(0), -1))
 
-BETA = 125
 
-def evaluate_model(model, loader):
-    model.eval()
-    val_loss, correct, total = 0, 0, 0
-    for batch_idx, (inputs, targets) in enumerate(loader):
-        inputs, targets = inputs.to('cuda'), targets.to('cuda')
-        outputs = model(inputs)
-        loss = F.cross_entropy(outputs[3], targets)
-        val_loss += loss.item()
-        _, predicted = torch.max(outputs[3].data, 1)
-        total += targets.size(0)
-        correct += predicted.eq(targets.data).cpu().sum().float().item()
-        b_idx = batch_idx
-    print(f'TEST | Loss: {val_loss/(b_idx+1):.3f} | Acc: {100*correct/total:.3f} |')
-    return val_loss/(b_idx+1), correct*100/total
+def tucker_distillation(teacher_outputs, student_outputs, targets, ranks=None):
+    teacher_fmap = teacher_outputs[2]
+    student_fmap = student_outputs[2]
+
+    teacher_core , teacher_factors = tucker(teacher_fmap, ranks)
+    student_core = compute_core(student_fmap, teacher_factors)
+
+    tucker_loss = BETA * F.l1_loss(FT(teacher_core), FT(student_core))
+    hard_loss = F.cross_entropy(student_outputs[3], targets)
+    return tucker_loss + hard_loss
+
+def tucker_recomp_distillation(teacher_outputs, student_outputs, targets,recomp_target,ranks=None): # Decomposes and recomposes teacher feature map
+    teacher_fmap = teacher_outputs[2]
+    student_fmap = student_outputs[2]
+
+    teacher_core , teacher_factors = tucker(teacher_fmap, ranks)
+    if recomp_target == 'teacher':
+        teacher_reconstructed = tl.tucker_to_tensor((teacher_core, teacher_factors))
+        brute_loss = 125 * F.l1_loss(FT(teacher_reconstructed), FT(student_fmap))
+    elif recomp_target == 'student':
+        student_core = compute_core(student_fmap, teacher_factors)
+        student_reconstructed = tl.tucker_to_tensor((student_core, teacher_factors))
+        brute_loss = 125 * F.l1_loss(FT(teacher_fmap), FT(student_reconstructed))
+    elif recomp_target == 'both':
+        student_core = compute_core(student_fmap, teacher_factors)
+        teacher_reconstructed = tl.tucker_to_tensor((teacher_core, teacher_factors))
+        student_reconstructed = tl.tucker_to_tensor((student_core, teacher_factors))
+        brute_loss = 125 * F.l1_loss(FT(teacher_reconstructed), FT(student_reconstructed))
+
+    hard_loss = F.cross_entropy(student_outputs[3], targets)
+    return brute_loss + hard_loss
+
+def feature_map_distillation(teacher_outputs, student_outputs, targets):
+    beta = 125
+    teacher_fmap = teacher_outputs[2]
+    student_fmap = student_outputs[2]
+    brute_loss = 125 * F.l1_loss(FT(teacher_fmap), FT(student_fmap))
+    hard_loss = F.cross_entropy(student_outputs[3], targets)
+    return brute_loss + hard_loss
+
+# Arguments
+
+DISTILLATIONS = {
+    'tucker' : tucker_distillation,
+    'tucker_recomp': tucker_recomp_distillation,
+    'featuremap': feature_map_distillation
+}
+
+parser = argparse.ArgumentParser(description='Run a training script with custom parameters.')
+parser.add_argument('--distillation', type=str, default='tucker', choices=DISTILLATIONS.keys())
+parser.add_argument('--ranks', type=str, default='128,32,8,8')
+parser.add_argument('--recomp_target', type=str, default='teacher')
+parser.add_argument('--experiment_name', type=str, default='default')
+args = parser.parse_args()
+
+Distillation = DISTILLATIONS[args.distillation]
+Ranks = [int(x) if x != 'BATCH_SIZE' else BATCH_SIZE for x in args.ranks.split(',')]
+Recomp_target = args.recomp_target
+experiment_path = args.experiment_name
+Path(f"experiments/{experiment_path}").mkdir(parents=True, exist_ok=True)
 
 
-import matplotlib.pyplot as plt
-import numpy as np
-def plot_the_things(train_loss, test_loss, train_acc, test_acc):
-        plt.plot(np.log10(np.array(train_loss)), linestyle='dotted',color='b', label=f'Train Loss')
-        plt.plot(np.log10(np.array(test_loss)), linestyle='solid',color='b', label=f'Test Loss')
+# Model setup
+model_path = r"toolbox/Cifar100_ResNet112.pth"
+teacher = ResNet112(100).to(DEVICE)
+teacher.load_state_dict(torch.load(model_path, weights_only=True)["weights"])
 
-        plt.xlabel('Epoch')
-        plt.ylabel('Log10 Loss')
-        plt.legend()
-        plt.savefig(f'logs/Loss.png')
-        plt.close()
+student = ResNet56(100).to(DEVICE)
 
-        max_acc = np.max(np.array(test_acc))
+Data = Cifar100(BATCH_SIZE)
+trainloader, testloader = Data.trainloader, Data.testloader
 
-        plt.plot(np.array(train_acc), linestyle='dotted',color='r', label=f'Train Accuracy')
-        plt.plot(np.array(test_acc), linestyle='solid',color='r', label=f'Test Accuracy')
-
-        plt.xlabel('Epoch')
-
-        plt.ylabel('Accuracy')
-        plt.ylim(0, 100)
-        plt.yticks(np.arange(0, 105, 5))
-        plt.grid(axis='y', linestyle='--', linewidth=0.5, alpha=0.7)
-
-        plt.axhline(y=max_acc, color='black', linestyle='-', linewidth=0.5)
-        plt.text(0, max_acc + 1, f"Max Acc = {max_acc}", color='black', fontsize=8)
-
-
-        plt.legend()
-        plt.savefig(f'logs/Accuracy.png')
-        plt.close()
+optimizer = optim.SGD(student.parameters(), lr=0.1, momentum=0.9, weight_decay=5e-4)
+scheduler = optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=EPOCHS)
 
 train_loss = []
 train_acc = []
@@ -111,20 +118,21 @@ for i in range(EPOCHS):
     student.train()
     val_loss, correct, total = 0, 0, 0
     for batch_idx, (inputs, targets) in enumerate(trainloader):
-        inputs, targets = inputs.to(device), targets.to(device)
+        inputs, targets = inputs.to(DEVICE), targets.to(DEVICE)
 
         optimizer.zero_grad()
 
+
         teacher_outputs = teacher(inputs)
         student_outputs = student(inputs)
+        if Distillation.__name__ == 'feature_map_distillation':
+            loss = Distillation(teacher_outputs, student_outputs, targets)
+        else:
+            if Distillation.__name__ == 'tucker_recomp_distillation':
+                loss = Distillation(teacher_outputs, student_outputs, targets, Recomp_target, Ranks)
+            else:
+                loss = Distillation(teacher_outputs, student_outputs, targets, Ranks)
 
-        teacher_tucker, teacher_factors = tucker(teacher_outputs[2])
-        # student_tucker, student_factors = tucker(student_outputs[2])
-        student_tucker = compute_core(student_outputs[2], teacher_factors)
-
-        tucker_loss = BETA * F.l1_loss(FT(teacher_tucker), FT(student_tucker))
-        hard_loss = F.cross_entropy(student_outputs[3], targets)
-        loss = tucker_loss + hard_loss
 
         print(loss)
 
@@ -139,16 +147,17 @@ for i in range(EPOCHS):
 
     scheduler.step()
 
-    print(f'TRAIN | Loss: {val_loss/(b_idx+1):.3f} | Acc: {100*correct/total:.3f} |')
-    train_loss.append(val_loss/(b_idx+1))
-    train_acc.append(correct*100/total)
+    trl, tra = val_loss/(b_idx+1), 100*correct/total
+    print(f'TRAIN | Loss: {trl:.3f} | Acc: {tra:.3f} |')
+    tel, tea = evaluate_model(student, testloader)
 
-    tel, test_accuracy = evaluate_model(student, testloader)
+    train_loss.append(trl)
+    train_acc.append(tra)
     test_loss.append(tel)
-    test_acc.append(test_accuracy)
+    test_acc.append(tea)
 
-    if test_accuracy > max_acc:
-        max_acc = test_accuracy
-        torch.save({'weights': student.state_dict()}, f'logs/ResNet56.pth')
+    if tea > max_acc:
+        max_acc = tea
+        torch.save({'weights': student.state_dict()}, f'experiments/{experiment_path}/ResNet56.pth')
     
-    plot_the_things(train_loss, test_loss, train_acc, test_acc)
+    plot_the_things(train_loss, test_loss, train_acc, test_acc, experiment_path)

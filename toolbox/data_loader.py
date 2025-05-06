@@ -4,7 +4,7 @@ import torch
 import os
 
 
-def get_loaders(dataset):
+def get_loaders(dataset, batch_size):
     if dataset == "Cifar100":
         ds = torchvision.datasets.CIFAR100
         mean, std = (0.5071, 0.4867, 0.4409), (0.267, 0.256, 0.276) 
@@ -26,24 +26,24 @@ def get_loaders(dataset):
     ])
 
     trainset = ds(root='./data', train=True, download=True, transform=transform_train)
-    trainloader = torch.utils.data.DataLoader(trainset, batch_size=128, shuffle=True, num_workers=num_workers)
+    trainloader = torch.utils.data.DataLoader(trainset, batch_size=batch_size, shuffle=True, num_workers=num_workers)
 
     testset = ds(root='./data', train=False, download=True, transform=transform_test)
-    testloader = torch.utils.data.DataLoader(testset, batch_size=128, shuffle=False, num_workers=num_workers)
+    testloader = torch.utils.data.DataLoader(testset, batch_size=batch_size, shuffle=False, num_workers=num_workers)
 
     return trainloader, testloader
     
 class DataHelper:
-    def __init__(self,dataset):
-        self.trainloader, self.testloader = get_loaders(dataset)
+    def __init__(self,dataset,batch_size):
+        self.trainloader, self.testloader = get_loaders(dataset, batch_size)
         self.name = dataset
         if dataset == 'Cifar100':
             self.class_num = 100
         elif dataset == 'Cifar10':
             self.class_num = 10
 
-def Cifar10():
-    return DataHelper('Cifar10')
+def Cifar10(batch_size=128):
+    return DataHelper('Cifar10', batch_size)
 
-def Cifar100():
-    return DataHelper('Cifar100')
+def Cifar100(batch_size=128):
+    return DataHelper('Cifar100', batch_size)
