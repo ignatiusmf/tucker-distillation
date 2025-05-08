@@ -1,11 +1,16 @@
 import subprocess
 import os
+from pathlib import Path
 
-
+testing = False if os.name == 'posix' else True 
+total = 0
 
 def generate_pbs_script(python_cmd, experiment_name):
-    python_cmd = f'{python_cmd} --experiment_name {experiment_name}'
-    print(python_cmd)
+    global total 
+    total += 1
+    if total > 10: exit()
+    if testing: return
+
     pbs_script = f"""#!/bin/sh
 #PBS -N {experiment_name}
 #PBS -q gpu_1
@@ -30,6 +35,7 @@ cd /mnt/lustre/users/iferreira/tucker-distillation
 
 echo -e "\\nTotal execution time: $(( $(date +%s) - start_time)) seconds"
 """
+
     temp_file = "temp_pbs_script.sh"
     with open(temp_file, 'w') as f:
         f.write(pbs_script)
@@ -45,31 +51,65 @@ echo -e "\\nTotal execution time: $(( $(date +%s) - start_time)) seconds"
             os.remove(temp_file)
 
 
-def generate_python_cmd(distillation, ranks, recomp_target):
-    return f"python test2.py --distillation {distillation} --ranks {ranks} --recomp_target {recomp_target}"
+def generate_python_cmd(distillation, experiment_name, ranks=None, recomp_target=None):
+    python_cmd = ''
+    if distillation == 'featuremap':
+        python_cmd += f"python test2.py --distillation {distillation}"
+    elif distillation == 'tucker':
+        python_cmd += f"python test2.py --distillation {distillation} --ranks {ranks}"
+    elif distillation == 'tucker_recomp':
+        python_cmd += f"python test2.py --distillation {distillation} --ranks {ranks} --recomp_target {recomp_target}"
+
+    python_cmd += f' --experiment_name {experiment_name}'
+    return python_cmd
 
 
-dists = ['tucker_recomp', 'tucker', 'featuremap']
-ranks_list = ['BATCH_SIZE,32,8,8', 'BATCH_SIZE,24,6,6']
+def check_path_and_skip(experiment_path):
+    if experiment_path.exists():
+        return True
+    else:
+        experiment_path.mkdir(parents=True)
+        return False
+
+runs = 5 
+            
+distillation = 'featuremap'
+
+for run in range(runs):
+    en = f'{distillation}/{run}'
+    experiment_path = Path(f'experiments/{en}')
+
+    if check_path_and_skip(experiment_path): continue
+
+    python_cmd = generate_python_cmd(distillation, en)
+    print(python_cmd)
+    generate_pbs_script(python_cmd, en)
+
+ranks_list = ['BATCH_SIZE,32,8,8', 'BATCH_SIZE,24,8,8', 'BATCH_SIZE,16,8,8', 'BATCH_SIZE,8,8,8']
+
+distillation = 'tucker'
+for rank in ranks_list:
+    for run in range(runs):
+        en = f'{distillation}/{rank}/{run}'
+        experiment_path = Path(f'experiments/{en}')
+
+        if check_path_and_skip(experiment_path): continue
+
+        python_cmd = generate_python_cmd(distillation, en, rank)
+        print(python_cmd)
+        generate_pbs_script(python_cmd, en)
+
 recomp_target_list = ['teacher', 'student', 'both']
 
-for distillation in dists:
-    if distillation == 'featuremap':
-        python_cmd = generate_python_cmd(distillation, ranks, recomp_target)
-        generate_pbs_script(python_cmd, 'featuremap')
-    else:
-        for i, ranks in enumerate(ranks_list):
-            if distillation == 'tucker_recomp':
-                for k, recomp_target in enumerate(recomp_target_list):
-                    python_cmd = generate_python_cmd(distillation, ranks, recomp_target)
-                    generate_pbs_script(python_cmd, f'recomp_{recomp_target_list[k]}_{i}')
-            else:
-                python_cmd = generate_python_cmd(distillation, ranks, recomp_target)
-                generate_pbs_script(python_cmd, f'tucker_{i}')
-                
-            
+distillation = 'tucker_recomp'
+for target in recomp_target_list:
+    for rank in ranks_list:
+        for run in range(runs):
+            en = f'{distillation}/{target}/{rank}/{run}'
+            experiment_path = Path(f'experiments/{en}')
 
-    
+            if check_path_and_skip(experiment_path): continue
 
-
-
+            python_cmd = generate_python_cmd(distillation, en, rank, target)
+            print(python_cmd)
+            generate_pbs_script(python_cmd, en)

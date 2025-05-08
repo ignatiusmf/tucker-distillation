@@ -80,10 +80,10 @@ DISTILLATIONS = {
 }
 
 parser = argparse.ArgumentParser(description='Run a training script with custom parameters.')
-parser.add_argument('--distillation', type=str, default='tucker', choices=DISTILLATIONS.keys())
+parser.add_argument('--distillation', type=str, default='featuremap', choices=DISTILLATIONS.keys())
 parser.add_argument('--ranks', type=str, default='128,32,8,8')
 parser.add_argument('--recomp_target', type=str, default='teacher')
-parser.add_argument('--experiment_name', type=str, default='default')
+parser.add_argument('--experiment_name', type=str, default='None')
 args = parser.parse_args()
 
 Distillation = DISTILLATIONS[args.distillation]
@@ -91,7 +91,7 @@ Ranks = [int(x) if x != 'BATCH_SIZE' else BATCH_SIZE for x in args.ranks.split('
 Recomp_target = args.recomp_target
 experiment_path = args.experiment_name
 Path(f"experiments/{experiment_path}").mkdir(parents=True, exist_ok=True)
-
+print(vars(args))
 
 # Model setup
 model_path = r"toolbox/Cifar100_ResNet112.pth"
@@ -122,7 +122,6 @@ for i in range(EPOCHS):
 
         optimizer.zero_grad()
 
-
         teacher_outputs = teacher(inputs)
         student_outputs = student(inputs)
         if Distillation.__name__ == 'feature_map_distillation':
@@ -132,9 +131,6 @@ for i in range(EPOCHS):
                 loss = Distillation(teacher_outputs, student_outputs, targets, Recomp_target, Ranks)
             else:
                 loss = Distillation(teacher_outputs, student_outputs, targets, Ranks)
-
-
-        print(loss)
 
         loss.backward()
         optimizer.step()
@@ -161,3 +157,13 @@ for i in range(EPOCHS):
         torch.save({'weights': student.state_dict()}, f'experiments/{experiment_path}/ResNet56.pth')
     
     plot_the_things(train_loss, test_loss, train_acc, test_acc, experiment_path)
+
+import json
+
+with open(f'experiments/{experiment_path}/metrics.json', 'w') as f:
+    json.dump({
+        'train_loss': train_loss,
+        'train_acc': train_acc,
+        'test_loss': test_loss,
+        'test_acc': test_acc
+    }, f)
