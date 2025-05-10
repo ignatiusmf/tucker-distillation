@@ -80,10 +80,10 @@ DISTILLATIONS = {
 }
 
 parser = argparse.ArgumentParser(description='Run a training script with custom parameters.')
-parser.add_argument('--distillation', type=str, default='featuremap', choices=DISTILLATIONS.keys())
+parser.add_argument('--distillation', type=str, default='tucker', choices=DISTILLATIONS.keys())
 parser.add_argument('--ranks', type=str, default='128,32,8,8')
 parser.add_argument('--recomp_target', type=str, default='teacher')
-parser.add_argument('--experiment_name', type=str, default='None')
+parser.add_argument('--experiment_name', type=str, default='tucker/BATCH_SIZE,24,8,8/0')
 args = parser.parse_args()
 
 Distillation = DISTILLATIONS[args.distillation]
@@ -140,6 +140,7 @@ for i in range(EPOCHS):
         total += targets.size(0)
         correct += predicted.eq(targets.data).cpu().sum().float().item()
         b_idx = batch_idx
+        break
 
     scheduler.step()
 
@@ -157,6 +158,7 @@ for i in range(EPOCHS):
         torch.save({'weights': student.state_dict()}, f'experiments/{experiment_path}/ResNet56.pth')
     
     plot_the_things(train_loss, test_loss, train_acc, test_acc, experiment_path)
+    break
 
 import json
 

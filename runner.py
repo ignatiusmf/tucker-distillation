@@ -2,13 +2,19 @@ import subprocess
 import os
 from pathlib import Path
 
-testing = False if os.name == 'posix' else True 
+testing = os.name != 'posix'
+
+limit = 10 if testing else 10 - int(
+    subprocess.run(
+        "qstat | grep iferreira | wc -l",
+        shell=True,
+        capture_output=True,
+        text=True
+    ).stdout.strip()
+)
 total = 0
 
 def generate_pbs_script(python_cmd, experiment_name):
-    global total 
-    total += 1
-    if total > 10: exit()
     if testing: return
 
     pbs_script = f"""#!/bin/sh
@@ -16,7 +22,7 @@ def generate_pbs_script(python_cmd, experiment_name):
 #PBS -q gpu_1
 #PBS -P CSCI1166
 #PBS -l select=1:ncpus=10:mpiprocs=10:mem=32gb:ngpus=1
-#PBS -l walltime=03:00:00
+#PBS -l walltime=02:30:00
 #PBS -o /mnt/lustre/users/iferreira/tucker-distillation/experiments/{experiment_name}/logs
 #PBS -e /mnt/lustre/users/iferreira/tucker-distillation/experiments/{experiment_name}/errors
 #PBS -m abe -M u25755422@tuks.co.za
@@ -37,41 +43,40 @@ echo -e "\\nTotal execution time: $(( $(date +%s) - start_time)) seconds"
 """
 
     temp_file = "temp_pbs_script.sh"
-    with open(temp_file, 'w') as f:
-        f.write(pbs_script)
+    Path(temp_file).write_text(pbs_script)
+
     try:
         result = subprocess.run(['qsub', temp_file], capture_output=True, text=True)
-        print(f"Job submitted: {result.stdout}")
+        print(f"Job submitted: {result.stdout.strip()}")
         if result.stderr:
-            print(f"Errors: {result.stderr}")
-    except subprocess.CalledProcessError as e:
-        print(f"Error submitting job: {e}")
+            print(f"Errors: {result.stderr.strip()}")
     finally:
-        if os.path.exists(temp_file):
-            os.remove(temp_file)
+        Path(temp_file).unlink(missing_ok=True)
+
 
 
 def generate_python_cmd(distillation, experiment_name, ranks=None, recomp_target=None):
-    python_cmd = ''
-    if distillation == 'featuremap':
-        python_cmd += f"python test2.py --distillation {distillation}"
-    elif distillation == 'tucker':
-        python_cmd += f"python test2.py --distillation {distillation} --ranks {ranks}"
-    elif distillation == 'tucker_recomp':
-        python_cmd += f"python test2.py --distillation {distillation} --ranks {ranks} --recomp_target {recomp_target}"
-
-    python_cmd += f' --experiment_name {experiment_name}'
-    return python_cmd
-
+    cmd = f"python test2.py --distillation {distillation}"
+    if ranks:
+        cmd += f" --ranks {ranks}"
+    if recomp_target:
+        cmd += f" --recomp_target {recomp_target}"
+    return f"{cmd} --experiment_name {experiment_name}"
 
 def check_path_and_skip(experiment_path):
+    global total, limit
+    if total == limit: 
+        print('Queue limit reached, exiting')
+        exit()
+
     if experiment_path.exists():
         return True
-    else:
-        experiment_path.mkdir(parents=True)
-        return False
 
-runs = 5 
+    experiment_path.mkdir(parents=True)
+    total += 1
+    return False
+
+runs = 3 
             
 distillation = 'featuremap'
 
