@@ -39,9 +39,12 @@ def generate_python_cmd(distillation, experiment_name, ranks=None, recomp_target
         cmd += f" --ranks {ranks}"
     if recomp_target:
         cmd += f" --recomp_target {recomp_target}"
-    return f"{cmd} --experiment_name {experiment_name}"
+    output = f"{cmd} --experiment_name {experiment_name}"
+    print(output)
+    return output
 
-def check_path_and_skip(experiment_path):
+def check_path_and_skip(experiment_name):
+    experiment_path = Path(f'experiments/{experiment_name}')
     global total, limit
     if total == limit: 
         print('Queue limit reached, exiting')
@@ -59,28 +62,24 @@ runs = 2
 distillation = 'featuremap'
 
 for run in range(runs):
-    en = f'{distillation}/{run}'
-    experiment_path = Path(f'experiments/{en}')
+    experiment_name = f'{distillation}/{run}'
 
-    if check_path_and_skip(experiment_path): continue
+    if check_path_and_skip(experiment_name): continue
 
-    python_cmd = generate_python_cmd(distillation, en)
-    print(python_cmd)
-    generate_pbs_script(python_cmd, en)
+    python_cmd = generate_python_cmd(distillation, experiment_name)
+    generate_pbs_script(python_cmd, experiment_name)
 
 ranks_list = ['BATCH_SIZE,32,8,8', 'BATCH_SIZE,24,8,8', 'BATCH_SIZE,16,8,8', 'BATCH_SIZE,8,8,8']
 
 distillation = 'tucker'
 for rank in ranks_list:
     for run in range(runs):
-        en = f'{distillation}/{rank}/{run}'
-        experiment_path = Path(f'experiments/{en}')
+        experiment_name = f'{distillation}/{rank}/{run}'
 
-        if check_path_and_skip(experiment_path): continue
+        if check_path_and_skip(experiment_name): continue
 
-        python_cmd = generate_python_cmd(distillation, en, rank)
-        print(python_cmd)
-        generate_pbs_script(python_cmd, en)
+        python_cmd = generate_python_cmd(distillation, experiment_name, rank)
+        generate_pbs_script(python_cmd, experiment_name)
 
 recomp_target_list = ['teacher', 'student', 'both']
 
@@ -88,13 +87,11 @@ distillation = 'tucker_recomp'
 for target in recomp_target_list:
     for rank in ranks_list:
         for run in range(runs):
-            en = f'{distillation}/{target}/{rank}/{run}'
-            experiment_path = Path(f'experiments/{en}')
+            experiment_name = f'{distillation}/{target}/{rank}/{run}'
 
-            if check_path_and_skip(experiment_path): continue
+            if check_path_and_skip(experiment_name): continue
 
-            python_cmd = generate_python_cmd(distillation, en, rank, target)
-            print(python_cmd)
-            generate_pbs_script(python_cmd, en)
+            python_cmd = generate_python_cmd(distillation, experiment_name, rank, target)
+            generate_pbs_script(python_cmd, experiment_name)
 
 print('All experiments are finished / queued')
