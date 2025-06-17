@@ -1,5 +1,5 @@
 # Tucker-Based Knowledge Distillation for CNNs
-
+This readme is currently generated with AI and will be refined at a later date.
 ## Synopsis
 
 This project explores novel strategies for knowledge distillation in convolutional neural networks (CNNs), focusing on feature map compression using Tucker decomposition. It implements and benchmarks multiple distillation variants on CIFAR-10 and CIFAR-100 datasets using ResNet-based teacher and student models.
